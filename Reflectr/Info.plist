@@ -4,6 +4,8 @@
 <dict>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Reflectr reads your workouts from Apple Health so your training sessions appear automatically in your calendar. Garmin, Apple Watch and most other trackers sync to Apple Health.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Reflectr does not write any data to Apple Health. This permission is only requested so Reflectr can read your workouts and show them in your calendar.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
