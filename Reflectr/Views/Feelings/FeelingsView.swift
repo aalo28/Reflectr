@@ -3,9 +3,9 @@
 //  Reflectr
 //
 //  Everything on one page, newest first:
-//  • a workout row — title, then five columns: Day · Before · During ·
-//    After · +1 day, where "Day" is your general feeling that day;
-//  • a rest-day row — just the day's general feeling.
+//  • a workout row — title (with the day's general feeling as a chip), then
+//    four columns: Before · During · After · +1 day;
+//  • a rest-day row — one line: date, "Rest day", the day's general feeling.
 //  A summary card on top compares your baseline on training vs rest days.
 //
 
@@ -103,7 +103,7 @@ struct FeelingsView: View {
 
     private var columnHeader: some View {
         HStack(spacing: 6) {
-            ForEach(FeelingsRow.columns) { phase in
+            ForEach(CheckInPhase.workoutPhases) { phase in
                 VStack(spacing: 2) {
                     Image(systemName: phase.systemImage)
                     Text(phase.columnTitle)
@@ -111,7 +111,7 @@ struct FeelingsView: View {
                         .minimumScaleFactor(0.8)
                 }
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(phase == .daily ? Color.orange : Color.secondary)
+                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -146,11 +146,11 @@ struct DailyEdit: Identifiable {
     let date: Date
 }
 
-// MARK: - Daily cell (shared by both row kinds)
+// MARK: - Daily chip (shared by both row kinds)
 
-/// The "Day" column: the day's first general check-in. Tap to edit it (or log
-/// one); long-press for the other entries that day or to add another.
-private struct DailyCell: View {
+/// The day's general feeling, compact enough to sit on a single line.
+/// Tap to edit the first entry (or log one); long-press for the others or to add another.
+private struct DailyChip: View {
     let day: Date
     let checkIns: [FeelingCheckIn]
     let onSelect: (DailyEdit) -> Void
@@ -166,7 +166,30 @@ private struct DailyCell: View {
             onSelect(first.map { DailyEdit(target: .existing($0), date: $0.date) }
                      ?? DailyEdit(target: .new(.daily), date: defaultDate))
         } label: {
-            FeelingCell(checkIn: first, tint: .orange, extraCount: max(checkIns.count - 1, 0))
+            HStack(spacing: 6) {
+                Image(systemName: CheckInPhase.daily.systemImage)
+                if let c = first {
+                    if let f = c.feeling { score("face.smiling", f) }
+                    if let e = c.energy { score("bolt", e) }
+                    if let s = c.soreness { score("bandage", s) }
+                    if c.feeling == nil && c.energy == nil && c.soreness == nil {
+                        Image(systemName: "text.alignleft")
+                    }
+                    if checkIns.count > 1 {
+                        Text("+\(checkIns.count - 1)").foregroundStyle(.secondary)
+                    }
+                } else {
+                    Image(systemName: "plus").foregroundStyle(.secondary)
+                }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(first == nil ? Color.secondary : Color.orange)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                Capsule().fill(first == nil ? Color.gray.opacity(0.10) : Color.orange.opacity(0.14))
+            )
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -183,15 +206,20 @@ private struct DailyCell: View {
                 Label(checkIns.isEmpty ? "Log how you felt" : "Add another", systemImage: "plus")
             }
         }
-        .accessibilityLabel("Day: \(first?.note ?? (first == nil ? "not logged" : "logged"))")
+        .accessibilityLabel(first == nil ? "Log how you felt this day" : "How you felt this day: \(first?.note ?? "logged")")
+    }
+
+    private func score(_ icon: String, _ value: Int) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: icon)
+            Text("\(value)")
+        }
     }
 }
 
 // MARK: - Rows
 
 private struct FeelingsRow: View {
-    static let columns: [CheckInPhase] = [.daily] + CheckInPhase.workoutPhases
-
     let workout: Workout
     let daily: [FeelingCheckIn]
     let onSelect: (CheckInTarget) -> Void
@@ -199,29 +227,38 @@ private struct FeelingsRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            NavigationLink(value: workout) {
-                HStack(spacing: 8) {
-                    Image(systemName: workout.type.systemImage)
-                        .foregroundStyle(workout.type.tint)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(workout.title.isEmpty ? workout.type.label : workout.title)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                        Text(workout.date, format: .dateTime.weekday(.abbreviated).day().month())
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                NavigationLink(value: workout) {
+                    HStack(spacing: 8) {
+                        Image(systemName: workout.type.systemImage)
+                            .foregroundStyle(workout.type.tint)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(workout.title.isEmpty ? workout.type.label : workout.title)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            Text(workout.date, format: .dateTime.weekday(.abbreviated).day().month())
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 4)
                     }
-                    Spacer()
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                DailyChip(day: workout.date.startOfDay, checkIns: daily, onSelect: onSelectDaily)
+
+                NavigationLink(value: workout) {
                     Image(systemName: "chevron.right")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             HStack(alignment: .top, spacing: 6) {
-                DailyCell(day: workout.date.startOfDay, checkIns: daily, onSelect: onSelectDaily)
                 ForEach(CheckInPhase.workoutPhases) { phase in
                     cell(for: phase)
                 }
@@ -245,41 +282,28 @@ private struct FeelingsRow: View {
     }
 }
 
-/// A day without training: date + the Day column; the workout columns hold a "Rest day" label.
+/// A day without training, on a single line: date · "Rest day" · the day's feeling.
 private struct RestDayRow: View {
     let day: Date
     let daily: [FeelingCheckIn]
     let onSelectDaily: (DailyEdit) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "moon.zzz")
-                    .foregroundStyle(.secondary)
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-            }
-
-            HStack(alignment: .top, spacing: 6) {
-                DailyCell(day: day, checkIns: daily, onSelect: onSelectDaily)
-                // Four empty slots keep the Day column the same width as on workout rows.
-                ForEach(0..<4, id: \.self) { _ in
-                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
-                }
-            }
-            .overlay(alignment: .trailing) {
-                GeometryReader { geo in
-                    let cell = (geo.size.width - 4 * 6) / 5
-                    Text("Rest day")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .frame(width: cell * 4 + 3 * 6, height: geo.size.height)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            }
+        HStack(spacing: 8) {
+            Image(systemName: "moon.zzz")
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+            Text("Rest day")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            DailyChip(day: day, checkIns: daily, onSelect: onSelectDaily)
         }
-        .padding(10)
-        .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var title: String {
