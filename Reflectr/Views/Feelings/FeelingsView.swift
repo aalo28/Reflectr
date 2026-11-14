@@ -2,21 +2,15 @@
 //  FeelingsView.swift
 //  Reflectr
 //
-//  Two views:
-//  • Daily — one card per day (training or rest) with general check-ins,
-//    plus a summary of your baseline and training vs rest days.
-//  • Workouts — every completed workout as a row with four columns —
-//    Before · During · Right after · +1 day.
+//  Everything on one page, newest first:
+//  • a workout row — title, then five columns: Day · Before · During ·
+//    After · +1 day, where "Day" is your general feeling that day;
+//  • a rest-day row — just the day's general feeling.
+//  A summary card on top compares your baseline on training vs rest days.
 //
 
 import SwiftUI
 import SwiftData
-
-enum FeelingsMode: String, CaseIterable, Identifiable {
-    case daily, workouts
-    var id: String { rawValue }
-    var label: String { self == .daily ? "Daily" : "Workouts" }
-}
 
 struct FeelingsView: View {
     @Query(
@@ -27,48 +21,55 @@ struct FeelingsView: View {
 
     @Query(
         filter: #Predicate<FeelingCheckIn> { $0.phaseRaw == "daily" },
-        sort: \FeelingCheckIn.date,
-        order: .reverse
+        sort: \FeelingCheckIn.date
     ) private var dailyCheckIns: [FeelingCheckIn]
 
-    @AppStorage("feelingsMode") private var mode: FeelingsMode = .daily
     @State private var editing: (workout: Workout, target: CheckInTarget)?
     @State private var editingDaily: DailyEdit?
 
     var body: some View {
+        let dailyByDay = Dictionary(grouping: dailyCheckIns, by: { $0.date.startOfDay })
+        let workoutsByDay = Dictionary(grouping: workouts, by: { $0.date.startOfDay })
+        let rows = Self.rows(workouts: workouts, workoutDays: Set(workoutsByDay.keys), dailyDays: Set(dailyByDay.keys))
+
         NavigationStack {
             ScrollView {
-                Picker("View", selection: $mode) {
-                    ForEach(FeelingsMode.allCases) { Text($0.label).tag($0) }
+                LazyVStack(spacing: 10, pinnedViews: [.sectionHeaders]) {
+                    DailySummaryCard(checkInsByDay: dailyByDay, workoutsByDay: workoutsByDay)
+                    Section {
+                        ForEach(rows) { row in
+                            switch row {
+                            case .workout(let workout):
+                                FeelingsRow(
+                                    workout: workout,
+                                    daily: dailyByDay[workout.date.startOfDay] ?? [],
+                                    onSelect: { editing = (workout, $0) },
+                                    onSelectDaily: { editingDaily = $0 }
+                                )
+                            case .restDay(let day):
+                                RestDayRow(
+                                    day: day,
+                                    daily: dailyByDay[day] ?? [],
+                                    onSelectDaily: { editingDaily = $0 }
+                                )
+                            }
+                        }
+                    } header: {
+                        columnHeader
+                    }
                 }
-                .pickerStyle(.segmented)
                 .padding(.horizontal)
-                .padding(.top, 4)
-
-                switch mode {
-                case .daily:
-                    DailyFeelingsList(
-                        checkIns: dailyCheckIns,
-                        workouts: workouts,
-                        onSelect: { editingDaily = $0 }
-                    )
-                    .padding(.horizontal)
-                    .padding(.bottom)
-                case .workouts:
-                    workoutGrid
-                }
+                .padding(.bottom)
             }
             .scrollContentBackground(.hidden)
             .background(BackgroundGradient())
             .navigationTitle("Feelings")
             .toolbar {
-                if mode == .daily {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            editingDaily = DailyEdit(target: .new(.daily), date: .now)
-                        } label: {
-                            Label("Log how you feel", systemImage: "plus")
-                        }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        editingDaily = DailyEdit(target: .new(.daily), date: .now)
+                    } label: {
+                        Label("Log how you feel today", systemImage: "plus")
                     }
                 }
             }
@@ -87,33 +88,22 @@ struct FeelingsView: View {
         }
     }
 
-    private var workoutGrid: some View {
-        LazyVStack(spacing: 10, pinnedViews: [.sectionHeaders]) {
-            Section {
-                if workouts.isEmpty {
-                    ContentUnavailableView(
-                        "No workouts yet",
-                        systemImage: "waveform.path.ecg",
-                        description: Text("Completed workouts show up here so you can compare how you felt.")
-                    )
-                    .padding(.top, 40)
-                }
-                ForEach(workouts) { workout in
-                    FeelingsRow(workout: workout) { target in
-                        editing = (workout, target)
-                    }
-                }
-            } header: {
-                columnHeader
-            }
-        }
-        .padding(.horizontal)
-        .padding(.bottom)
+    /// Workouts plus rest days, newest first. Rest days shown: the last two
+    /// weeks (so you can fill them in) and any older day with a daily check-in.
+    private static func rows(workouts: [Workout], workoutDays: Set<Date>, dailyDays: Set<Date>) -> [FeelingsRowItem] {
+        let today = Date.now.startOfDay
+        var restDays = Set((0..<14).map { today.addingDays(-$0) })
+        restDays.formUnion(dailyDays.filter { $0 <= today })
+        restDays.subtract(workoutDays)
+
+        let items = workouts.map(FeelingsRowItem.workout) + restDays.map(FeelingsRowItem.restDay)
+        // Same day: rest-day can't collide with workouts; workouts keep their time order.
+        return items.sorted { $0.sortDate > $1.sortDate }
     }
 
     private var columnHeader: some View {
         HStack(spacing: 6) {
-            ForEach(CheckInPhase.workoutPhases) { phase in
+            ForEach(FeelingsRow.columns) { phase in
                 VStack(spacing: 2) {
                     Image(systemName: phase.systemImage)
                     Text(phase.columnTitle)
@@ -121,7 +111,7 @@ struct FeelingsView: View {
                         .minimumScaleFactor(0.8)
                 }
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(phase == .daily ? Color.orange : Color.secondary)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -131,7 +121,24 @@ struct FeelingsView: View {
     }
 }
 
-// MARK: - Daily
+private enum FeelingsRowItem: Identifiable {
+    case workout(Workout)
+    case restDay(Date)
+
+    var id: String {
+        switch self {
+        case .workout(let w): "w-\(w.persistentModelID.hashValue)"
+        case .restDay(let d): "r-\(d.timeIntervalSinceReferenceDate)"
+        }
+    }
+
+    var sortDate: Date {
+        switch self {
+        case .workout(let w): w.date
+        case .restDay(let d): d
+        }
+    }
+}
 
 struct DailyEdit: Identifiable {
     let id = UUID()
@@ -139,44 +146,151 @@ struct DailyEdit: Identifiable {
     let date: Date
 }
 
-/// One card per day — today and the past two weeks always, plus any older day
-/// with a daily check-in — showing general check-ins and any workouts that day.
-private struct DailyFeelingsList: View {
+// MARK: - Daily cell (shared by both row kinds)
+
+/// The "Day" column: the day's first general check-in. Tap to edit it (or log
+/// one); long-press for the other entries that day or to add another.
+private struct DailyCell: View {
+    let day: Date
     let checkIns: [FeelingCheckIn]
-    let workouts: [Workout]
     let onSelect: (DailyEdit) -> Void
 
-    private var checkInsByDay: [Date: [FeelingCheckIn]] {
-        Dictionary(grouping: checkIns, by: { $0.date.startOfDay })
-    }
-
-    private var workoutsByDay: [Date: [Workout]] {
-        Dictionary(grouping: workouts, by: { $0.date.startOfDay })
-    }
-
-    private var days: [Date] {
-        let today = Date.now.startOfDay
-        var set = Set((0..<14).map { today.addingDays(-$0) })
-        set.formUnion(checkInsByDay.keys.filter { $0 <= today })
-        return set.sorted(by: >)
+    /// New entries for today use the current time; past days default to noon.
+    private var defaultDate: Date {
+        day.isSameDay(as: .now) ? .now : Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day
     }
 
     var body: some View {
-        let byDay = checkInsByDay
-        let wByDay = workoutsByDay
-        LazyVStack(spacing: 10) {
-            DailySummaryCard(checkInsByDay: byDay, workoutsByDay: wByDay)
-            ForEach(days, id: \.self) { day in
-                DayCard(
-                    day: day,
-                    checkIns: (byDay[day] ?? []).sorted { $0.date < $1.date },
-                    workouts: wByDay[day] ?? [],
-                    onSelect: onSelect
-                )
+        let first = checkIns.first
+        Button {
+            onSelect(first.map { DailyEdit(target: .existing($0), date: $0.date) }
+                     ?? DailyEdit(target: .new(.daily), date: defaultDate))
+        } label: {
+            FeelingCell(checkIn: first, tint: .orange, extraCount: max(checkIns.count - 1, 0))
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            ForEach(checkIns) { c in
+                Button {
+                    onSelect(DailyEdit(target: .existing(c), date: c.date))
+                } label: {
+                    Label(c.date.formatted(.dateTime.hour().minute()), systemImage: "pencil")
+                }
+            }
+            Button {
+                onSelect(DailyEdit(target: .new(.daily), date: defaultDate))
+            } label: {
+                Label(checkIns.isEmpty ? "Log how you felt" : "Add another", systemImage: "plus")
             }
         }
+        .accessibilityLabel("Day: \(first?.note ?? (first == nil ? "not logged" : "logged"))")
     }
 }
+
+// MARK: - Rows
+
+private struct FeelingsRow: View {
+    static let columns: [CheckInPhase] = [.daily] + CheckInPhase.workoutPhases
+
+    let workout: Workout
+    let daily: [FeelingCheckIn]
+    let onSelect: (CheckInTarget) -> Void
+    let onSelectDaily: (DailyEdit) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            NavigationLink(value: workout) {
+                HStack(spacing: 8) {
+                    Image(systemName: workout.type.systemImage)
+                        .foregroundStyle(workout.type.tint)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(workout.title.isEmpty ? workout.type.label : workout.title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        Text(workout.date, format: .dateTime.weekday(.abbreviated).day().month())
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            HStack(alignment: .top, spacing: 6) {
+                DailyCell(day: workout.date.startOfDay, checkIns: daily, onSelect: onSelectDaily)
+                ForEach(CheckInPhase.workoutPhases) { phase in
+                    cell(for: phase)
+                }
+            }
+        }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder
+    private func cell(for phase: CheckInPhase) -> some View {
+        // For "+1 day" use the first later check-in.
+        let entry = workout.checkIns(for: phase).first
+        Button {
+            onSelect(entry.map { .existing($0) } ?? .new(phase))
+        } label: {
+            FeelingCell(checkIn: entry)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(phase.columnTitle): \(entry?.note ?? "not logged")")
+    }
+}
+
+/// A day without training: date + the Day column; the workout columns hold a "Rest day" label.
+private struct RestDayRow: View {
+    let day: Date
+    let daily: [FeelingCheckIn]
+    let onSelectDaily: (DailyEdit) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "moon.zzz")
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            HStack(alignment: .top, spacing: 6) {
+                DailyCell(day: day, checkIns: daily, onSelect: onSelectDaily)
+                Text("Rest day")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    // Span the four workout columns (4 cells + 3 gaps).
+                    .layoutPriority(-1)
+                    .frame(maxWidth: .infinity)
+                    .containerRelativeFrame(.horizontal) { w, _ in w }
+                    .hidden()
+                    .overlay {
+                        Text("Rest day")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+            }
+        }
+        .padding(10)
+        .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var title: String {
+        let cal = Calendar.current
+        if cal.isDateInToday(day) { return "Today" }
+        if cal.isDateInYesterday(day) { return "Yesterday" }
+        return day.formatted(.dateTime.weekday(.abbreviated).day().month())
+    }
+}
+
+// MARK: - Summary
 
 /// Average daily feeling/energy over the last 7 and 30 days, and training vs rest days.
 private struct DailySummaryCard: View {
@@ -248,193 +362,6 @@ private struct DailySummaryCard: View {
         Text(v.map { String(format: "%.1f", $0) } ?? "–")
             .font(.caption.weight(.semibold).monospacedDigit())
             .foregroundStyle(v == nil ? Color.secondary : Color.accentColor)
-    }
-}
-
-private struct DayCard: View {
-    let day: Date
-    let checkIns: [FeelingCheckIn]
-    let workouts: [Workout]
-    let onSelect: (DailyEdit) -> Void
-
-    /// New entries for today use the current time; past days default to noon.
-    private var defaultDate: Date {
-        day.isSameDay(as: .now) ? .now : Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(dayTitle).font(.subheadline.weight(.semibold))
-                    Text(workouts.isEmpty ? "Rest day" : workouts.map(\.displayTitle).joined(separator: " · "))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button {
-                    onSelect(DailyEdit(target: .new(.daily), date: defaultDate))
-                } label: {
-                    Image(systemName: "plus.circle.fill").font(.title3)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-                .accessibilityLabel("Log how you felt on \(dayTitle)")
-            }
-
-            if checkIns.isEmpty {
-                Text("No check-in")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            ForEach(checkIns) { c in
-                Button {
-                    onSelect(DailyEdit(target: .existing(c), date: c.date))
-                } label: {
-                    DailyCheckInRow(checkIn: c)
-                }
-                .buttonStyle(.plain)
-            }
-
-            ForEach(workouts) { w in
-                NavigationLink(value: w) {
-                    WorkoutFeelingStrip(workout: w)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-    }
-
-    private var dayTitle: String {
-        let cal = Calendar.current
-        if cal.isDateInToday(day) { return "Today" }
-        if cal.isDateInYesterday(day) { return "Yesterday" }
-        return day.formatted(.dateTime.weekday(.wide).day().month())
-    }
-}
-
-private struct DailyCheckInRow: View {
-    let checkIn: FeelingCheckIn
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 10) {
-                Text(checkIn.date, format: .dateTime.hour().minute())
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                if let f = checkIn.feeling { score("face.smiling", f) }
-                if let e = checkIn.energy { score("bolt", e) }
-                if let s = checkIn.soreness { score("bandage", s) }
-                Spacer(minLength: 0)
-            }
-            if let note = checkIn.note, !note.isEmpty {
-                Text(note)
-                    .font(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.10)))
-        .contentShape(Rectangle())
-    }
-
-    private func score(_ icon: String, _ value: Int) -> some View {
-        Label("\(value)", systemImage: icon)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Color.accentColor)
-    }
-}
-
-/// Compact line for a workout on a day card: icon + the feeling score per phase.
-private struct WorkoutFeelingStrip: View {
-    let workout: Workout
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: workout.type.systemImage)
-                .foregroundStyle(workout.type.tint)
-                .font(.caption)
-            ForEach(CheckInPhase.workoutPhases) { phase in
-                let f = workout.checkIns(for: phase).first?.feeling
-                HStack(spacing: 2) {
-                    Image(systemName: phase.systemImage)
-                    Text(f.map(String.init) ?? "–")
-                }
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(f == nil ? Color.secondary : Color.accentColor)
-            }
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.08)))
-        .contentShape(Rectangle())
-        .accessibilityLabel("\(workout.displayTitle) feelings")
-    }
-}
-
-private extension Workout {
-    var displayTitle: String { title.isEmpty ? type.label : title }
-}
-
-// MARK: - Row
-
-private struct FeelingsRow: View {
-    let workout: Workout
-    let onSelect: (CheckInTarget) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            NavigationLink(value: workout) {
-                HStack(spacing: 8) {
-                    Image(systemName: workout.type.systemImage)
-                        .foregroundStyle(workout.type.tint)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(workout.title.isEmpty ? workout.type.label : workout.title)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                        Text(workout.date, format: .dateTime.weekday(.abbreviated).day().month())
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            HStack(alignment: .top, spacing: 6) {
-                ForEach(CheckInPhase.workoutPhases) { phase in
-                    cell(for: phase)
-                }
-            }
-        }
-        .padding(10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-    }
-
-    @ViewBuilder
-    private func cell(for phase: CheckInPhase) -> some View {
-        // For "+1 day" use the first later check-in.
-        let entry = workout.checkIns(for: phase).first
-        Button {
-            onSelect(entry.map { .existing($0) } ?? .new(phase))
-        } label: {
-            FeelingCell(checkIn: entry)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(phase.columnTitle): \(entry?.note ?? "not logged")")
     }
 }
 
