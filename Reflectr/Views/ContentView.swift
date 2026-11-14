@@ -17,7 +17,7 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [Workout.self, Reflection.self, Exercise.self, ExerciseSet.self, Settings.self], inMemory: true)
+        .modelContainer(for: [Workout.self, Reflection.self, FeelingCheckIn.self, Exercise.self, ExerciseSet.self, Settings.self], inMemory: true)
         .environment(AppRouter())
         .environment(HealthKitManager())
         .environment(Settings())

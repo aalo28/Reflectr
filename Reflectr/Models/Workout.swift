@@ -46,6 +46,10 @@ final class Workout {
     @Relationship(deleteRule: .cascade, inverse: \Exercise.workout)
     var exercises: [Exercise]?
 
+    /// "How do I feel" snapshots: before, during, right after, days later.
+    @Relationship(deleteRule: .cascade, inverse: \FeelingCheckIn.workout)
+    var checkIns: [FeelingCheckIn]?
+
     init(
         id: UUID = UUID(),
         date: Date = .now,
@@ -96,6 +100,11 @@ extension Workout {
     /// A completed session that still has no reflection written.
     var needsReflection: Bool {
         isCompleted && reflection == nil
+    }
+
+    /// Check-ins for a phase, oldest first.
+    func checkIns(for phase: CheckInPhase) -> [FeelingCheckIn] {
+        (checkIns ?? []).filter { $0.phase == phase }.sorted { $0.date < $1.date }
     }
 
     var orderedExercises: [Exercise] {

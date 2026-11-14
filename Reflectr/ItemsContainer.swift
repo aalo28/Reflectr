@@ -11,7 +11,7 @@ import SwiftData
 actor ItemsContainer {
     @MainActor
     static func create(shouldSeed: inout Bool) -> ModelContainer {
-        let schema = Schema([Workout.self, Reflection.self, Exercise.self, ExerciseSet.self, Settings.self])
+        let schema = Schema([Workout.self, Reflection.self, FeelingCheckIn.self, Exercise.self, ExerciseSet.self, Settings.self])
         let config = ModelConfiguration(
             "Reflectr",
             schema: schema,
