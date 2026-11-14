@@ -3,10 +3,9 @@
 //  Reflectr
 //
 //  Everything on one page, newest first:
-//  • a workout row — title (with the day's general feeling as a chip), then
-//    four columns: Before · During · After · +1 day;
-//  • a rest-day row — one line: date, "Rest day", the day's general feeling.
-//  Notes from the day's general check-ins show under the row's first line.
+//  • a workout row — small date above the title, a one-line "how was the
+//    day" strip (scores + note), then four columns: Before · During · After · +1 day;
+//  • a rest-day row — small date, "Rest day", and the same one-line day strip.
 //  A summary card on top compares your baseline on training vs rest days.
 //
 
@@ -147,11 +146,61 @@ struct DailyEdit: Identifiable {
     let date: Date
 }
 
-// MARK: - Daily chip (shared by both row kinds)
+// MARK: - Shared bits
 
-/// The day's general feeling, compact enough to sit on a single line.
-/// Tap to edit the first entry (or log one); long-press for the others or to add another.
-private struct DailyChip: View {
+/// One score: icon + number, tight and never truncated.
+private struct Score: View {
+    let icon: String
+    let value: Int
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: icon)
+            Text("\(value)").monospacedDigit()
+        }
+        .fixedSize()
+    }
+}
+
+/// The scores of a check-in, laid out to fit the space: one line if possible,
+/// otherwise wrapped onto two or three.
+private struct Scores: View {
+    let checkIn: FeelingCheckIn
+
+    var body: some View {
+        let items: [(String, Int)] = [
+            ("face.smiling", checkIn.feeling),
+            ("bolt", checkIn.energy),
+            ("bandage", checkIn.soreness),
+        ].compactMap { icon, v in v.map { (icon, $0) } }
+
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) { ForEach(items, id: \.0) { Score(icon: $0.0, value: $0.1) } }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) { ForEach(items.prefix(2), id: \.0) { Score(icon: $0.0, value: $0.1) } }
+                HStack(spacing: 6) { ForEach(items.dropFirst(2), id: \.0) { Score(icon: $0.0, value: $0.1) } }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(items, id: \.0) { Score(icon: $0.0, value: $0.1) }
+            }
+        }
+    }
+}
+
+/// Small date shown above each row's title.
+private func dayLabel(_ day: Date) -> String {
+    let cal = Calendar.current
+    let date = day.formatted(.dateTime.weekday(.abbreviated).day().month())
+    if cal.isDateInToday(day) { return "Today · \(date)" }
+    if cal.isDateInYesterday(day) { return "Yesterday · \(date)" }
+    return date
+}
+
+// MARK: - Daily line (shared by both row kinds)
+
+/// The day's general feeling on one line: ☀️ scores · note. Tap to edit the
+/// first entry (or log one); long-press for the others or to add another.
+private struct DailyLine: View {
     let day: Date
     let checkIns: [FeelingCheckIn]
     let onSelect: (DailyEdit) -> Void
@@ -163,34 +212,53 @@ private struct DailyChip: View {
 
     var body: some View {
         let first = checkIns.first
+        // Notes from every entry that day, joined so they fit on the one line.
+        let note = checkIns.compactMap { $0.note }.filter { !$0.isEmpty }.joined(separator: " · ")
+
         Button {
             onSelect(first.map { DailyEdit(target: .existing($0), date: $0.date) }
                      ?? DailyEdit(target: .new(.daily), date: defaultDate))
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Image(systemName: CheckInPhase.daily.systemImage)
-                if let c = first {
-                    if let f = c.feeling { score("face.smiling", f) }
-                    if let e = c.energy { score("bolt", e) }
-                    if let s = c.soreness { score("bandage", s) }
-                    if c.feeling == nil && c.energy == nil && c.soreness == nil {
-                        Image(systemName: "text.alignleft")
+                    .foregroundStyle(.orange)
+                if let first {
+                    HStack(spacing: 6) {
+                        if let f = first.feeling { Score(icon: "face.smiling", value: f) }
+                        if let e = first.energy { Score(icon: "bolt", value: e) }
+                        if let s = first.soreness { Score(icon: "bandage", value: s) }
                     }
+                    .foregroundStyle(.orange)
+                    .fixedSize()
+                    if !note.isEmpty {
+                        Text(note)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Spacer(minLength: 0)
                     if checkIns.count > 1 {
-                        Text("+\(checkIns.count - 1)").foregroundStyle(.secondary)
+                        Text("+\(checkIns.count - 1)")
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
                     }
                 } else {
-                    Image(systemName: "plus").foregroundStyle(.secondary)
+                    Text("How did you feel this day?")
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                    Image(systemName: "plus")
+                        .foregroundStyle(.secondary)
                 }
             }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(first == nil ? Color.secondary : Color.orange)
+            .font(.caption.weight(.medium))
             .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                Capsule().fill(first == nil ? Color.gray.opacity(0.10) : Color.orange.opacity(0.14))
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(first == nil ? Color.gray.opacity(0.08) : Color.orange.opacity(0.12))
             )
-            .contentShape(Capsule())
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -198,7 +266,8 @@ private struct DailyChip: View {
                 Button {
                     onSelect(DailyEdit(target: .existing(c), date: c.date))
                 } label: {
-                    Label(c.date.formatted(.dateTime.hour().minute()), systemImage: "pencil")
+                    Label(c.date.formatted(.dateTime.hour().minute()) + ((c.note ?? "").isEmpty ? "" : " — \(c.note!)"),
+                          systemImage: "pencil")
                 }
             }
             Button {
@@ -207,45 +276,7 @@ private struct DailyChip: View {
                 Label(checkIns.isEmpty ? "Log how you felt" : "Add another", systemImage: "plus")
             }
         }
-        .accessibilityLabel(first == nil ? "Log how you felt this day" : "How you felt this day: \(first?.note ?? "logged")")
-    }
-
-    private func score(_ icon: String, _ value: Int) -> some View {
-        HStack(spacing: 2) {
-            Image(systemName: icon)
-            Text("\(value)")
-        }
-    }
-}
-
-/// The notes from a day's general check-ins, one per line. Tap one to edit it.
-private struct DailyNotes: View {
-    let checkIns: [FeelingCheckIn]
-    let onSelect: (DailyEdit) -> Void
-
-    var body: some View {
-        let withNotes = checkIns.filter { !($0.note ?? "").isEmpty }
-        if !withNotes.isEmpty {
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(withNotes) { c in
-                    Button {
-                        onSelect(DailyEdit(target: .existing(c), date: c.date))
-                    } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Image(systemName: CheckInPhase.daily.systemImage)
-                                .foregroundStyle(.orange)
-                            Text(c.note ?? "")
-                                .foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                        }
-                        .font(.caption)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
+        .accessibilityLabel(first == nil ? "Log how you felt this day" : "How you felt this day. \(note)")
     }
 }
 
@@ -258,39 +289,30 @@ private struct FeelingsRow: View {
     let onSelectDaily: (DailyEdit) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                NavigationLink(value: workout) {
-                    HStack(spacing: 8) {
-                        Image(systemName: workout.type.systemImage)
-                            .foregroundStyle(workout.type.tint)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(workout.title.isEmpty ? workout.type.label : workout.title)
-                                .font(.subheadline.weight(.semibold))
-                                .lineLimit(1)
-                            Text(workout.date, format: .dateTime.weekday(.abbreviated).day().month())
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 4)
+        VStack(alignment: .leading, spacing: 8) {
+            NavigationLink(value: workout) {
+                HStack(spacing: 8) {
+                    Image(systemName: workout.type.systemImage)
+                        .foregroundStyle(workout.type.tint)
+                        .frame(width: 22)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(dayLabel(workout.date))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(workout.title.isEmpty ? workout.type.label : workout.title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
                     }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                DailyChip(day: workout.date.startOfDay, checkIns: daily, onSelect: onSelectDaily)
-
-                NavigationLink(value: workout) {
+                    Spacer(minLength: 4)
                     Image(systemName: "chevron.right")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
-                        .padding(.vertical, 6)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
 
-            DailyNotes(checkIns: daily, onSelect: onSelectDaily)
+            DailyLine(day: workout.date.startOfDay, checkIns: daily, onSelect: onSelectDaily)
 
             HStack(alignment: .top, spacing: 6) {
                 ForEach(CheckInPhase.workoutPhases) { phase in
@@ -316,42 +338,32 @@ private struct FeelingsRow: View {
     }
 }
 
-/// A day without training, on a single line: date · "Rest day" · the day's feeling.
+/// A day without training: small date, "Rest day", then the day's feeling line.
 private struct RestDayRow: View {
     let day: Date
     let daily: [FeelingCheckIn]
     let onSelectDaily: (DailyEdit) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            mainLine
-            DailyNotes(checkIns: daily, onSelect: onSelectDaily)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "moon.zzz")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(dayLabel(day))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Rest day")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            DailyLine(day: day, checkIns: daily, onSelect: onSelectDaily)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private var mainLine: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "moon.zzz")
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-            Text("Rest day")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 4)
-            DailyChip(day: day, checkIns: daily, onSelect: onSelectDaily)
-        }
-    }
-
-    private var title: String {
-        let cal = Calendar.current
-        if cal.isDateInToday(day) { return "Today" }
-        if cal.isDateInYesterday(day) { return "Yesterday" }
-        return day.formatted(.dateTime.weekday(.abbreviated).day().month())
+        .padding(10)
+        .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -436,11 +448,9 @@ private struct FeelingCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let c = checkIn {
-                HStack(spacing: 4) {
-                    if let f = c.feeling { score("face.smiling", f) }
-                    if let e = c.energy { score("bolt", e) }
-                }
-                if let s = c.soreness { score("bandage", s) }
+                Scores(checkIn: c)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
                 if let rel = c.relativeLabel, rel != "1 day after" {
                     Text(rel).font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
                 }
@@ -464,13 +474,6 @@ private struct FeelingCell: View {
                 .fill(checkIn == nil ? Color.gray.opacity(0.08) : Color.accentColor.opacity(0.10))
         )
         .contentShape(Rectangle())
-    }
-
-    private func score(_ icon: String, _ value: Int) -> some View {
-        Label("\(value)", systemImage: icon)
-            .labelStyle(.titleAndIcon)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(Color.accentColor)
     }
 }
 
