@@ -30,7 +30,7 @@ struct FeelingTimelineCard: View {
 
     /// Before a planned session is done, only "before" and "during" make sense.
     private var phases: [CheckInPhase] {
-        workout.isPlanned && !workout.isCompleted ? [.before, .during] : CheckInPhase.allCases
+        workout.isPlanned && !workout.isCompleted ? [.before, .during] : CheckInPhase.workoutPhases
     }
 
     var body: some View {
@@ -123,8 +123,11 @@ struct CheckInEditorView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
-    let workout: Workout
+    /// `nil` for a general daily check-in.
+    var workout: Workout?
     let target: CheckInTarget
+    /// Default timestamp for a new entry (e.g. when logging a past day).
+    var initialDate: Date?
 
     @State private var feeling: Int?
     @State private var energy: Int?
@@ -169,7 +172,7 @@ struct CheckInEditorView: View {
                     }
                 }
             }
-            .navigationTitle(phase.label)
+            .navigationTitle(phase == .daily ? "Daily check-in" : phase.label)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -187,7 +190,10 @@ struct CheckInEditorView: View {
     }
 
     private func load() {
-        guard let c = existing else { return }
+        guard let c = existing else {
+            if let initialDate { date = initialDate }
+            return
+        }
         feeling = c.feeling
         energy = c.energy
         soreness = c.soreness

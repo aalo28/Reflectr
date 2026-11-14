@@ -2,8 +2,9 @@
 //  FeelingCheckIn.swift
 //  Reflectr
 //
-//  A quick "how do I feel right now?" snapshot tied to a workout, taken at a
-//  specific moment: before, during, right after, or some days later.
+//  A quick "how do I feel right now?" snapshot. Either tied to a workout
+//  (before, during, right after, or some days later), or a general daily
+//  check-in with no workout — so rest days get logged too.
 //
 
 import Foundation
@@ -14,6 +15,11 @@ enum CheckInPhase: String, CaseIterable, Codable, Identifiable {
     case during
     case after
     case later
+    /// General "how am I today?" — not tied to any workout.
+    case daily
+
+    /// The phases shown around a workout (everything except `daily`).
+    static let workoutPhases: [CheckInPhase] = [.before, .during, .after, .later]
 
     var id: String { rawValue }
 
@@ -23,6 +29,7 @@ enum CheckInPhase: String, CaseIterable, Codable, Identifiable {
         case .during: "During"
         case .after: "Right after"
         case .later: "Days later"
+        case .daily: "Today"
         }
     }
 
@@ -32,6 +39,7 @@ enum CheckInPhase: String, CaseIterable, Codable, Identifiable {
         case .during: "figure.run"
         case .after: "flag.checkered"
         case .later: "calendar.badge.clock"
+        case .daily: "sun.max"
         }
     }
 
@@ -41,14 +49,16 @@ enum CheckInPhase: String, CaseIterable, Codable, Identifiable {
         case .during: "How is it feeling right now?"
         case .after: "How do you feel now that it's done?"
         case .later: "Looking back — how is your body doing?"
+        case .daily: "How are you feeling today?"
         }
     }
 
     /// Soreness is mostly meaningful once the session is over.
-    var tracksSoreness: Bool { self == .after || self == .later }
+    var tracksSoreness: Bool { self == .after || self == .later || self == .daily }
 
-    /// "Days later" can be logged more than once (e.g. day 1 and day 3).
-    var allowsMultiple: Bool { self == .later }
+    /// "Days later" can be logged more than once (e.g. day 1 and day 3), and a
+    /// daily check-in can be logged several times a day (morning, evening…).
+    var allowsMultiple: Bool { self == .later || self == .daily }
 }
 
 @Model
