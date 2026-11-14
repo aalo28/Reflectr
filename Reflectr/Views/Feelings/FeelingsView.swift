@@ -391,9 +391,6 @@ private struct DailySummaryCard: View {
 
 private struct FeelingCell: View {
     let checkIn: FeelingCheckIn?
-    var tint: Color = .accentColor
-    /// More entries exist than the one shown (e.g. a second daily check-in).
-    var extraCount: Int = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -412,9 +409,6 @@ private struct FeelingCell: View {
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if extraCount > 0 {
-                    Text("+\(extraCount) more").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-                }
             } else {
                 Image(systemName: "plus")
                     .font(.caption)
@@ -426,7 +420,7 @@ private struct FeelingCell: View {
         .padding(6)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(checkIn == nil ? Color.gray.opacity(0.08) : tint.opacity(0.12))
+                .fill(checkIn == nil ? Color.gray.opacity(0.08) : Color.accentColor.opacity(0.10))
         )
         .contentShape(Rectangle())
     }
@@ -435,7 +429,7 @@ private struct FeelingCell: View {
         Label("\(value)", systemImage: icon)
             .labelStyle(.titleAndIcon)
             .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(tint)
+            .foregroundStyle(Color.accentColor)
     }
 }
 
