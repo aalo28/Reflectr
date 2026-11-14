@@ -262,20 +262,20 @@ private struct RestDayRow: View {
 
             HStack(alignment: .top, spacing: 6) {
                 DailyCell(day: day, checkIns: daily, onSelect: onSelectDaily)
-                Text("Rest day")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    // Span the four workout columns (4 cells + 3 gaps).
-                    .layoutPriority(-1)
-                    .frame(maxWidth: .infinity)
-                    .containerRelativeFrame(.horizontal) { w, _ in w }
-                    .hidden()
-                    .overlay {
-                        Text("Rest day")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
+                // Four empty slots keep the Day column the same width as on workout rows.
+                ForEach(0..<4, id: \.self) { _ in
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                }
+            }
+            .overlay(alignment: .trailing) {
+                GeometryReader { geo in
+                    let cell = (geo.size.width - 4 * 6) / 5
+                    Text("Rest day")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .frame(width: cell * 4 + 3 * 6, height: geo.size.height)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
         }
         .padding(10)
@@ -367,6 +367,9 @@ private struct DailySummaryCard: View {
 
 private struct FeelingCell: View {
     let checkIn: FeelingCheckIn?
+    var tint: Color = .accentColor
+    /// More entries exist than the one shown (e.g. a second daily check-in).
+    var extraCount: Int = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -385,6 +388,9 @@ private struct FeelingCell: View {
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if extraCount > 0 {
+                    Text("+\(extraCount) more").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                }
             } else {
                 Image(systemName: "plus")
                     .font(.caption)
@@ -396,7 +402,7 @@ private struct FeelingCell: View {
         .padding(6)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(checkIn == nil ? Color.gray.opacity(0.08) : Color.accentColor.opacity(0.10))
+                .fill(checkIn == nil ? Color.gray.opacity(0.08) : tint.opacity(0.12))
         )
         .contentShape(Rectangle())
     }
@@ -405,7 +411,7 @@ private struct FeelingCell: View {
         Label("\(value)", systemImage: icon)
             .labelStyle(.titleAndIcon)
             .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(tint)
     }
 }
 
