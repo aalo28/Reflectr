@@ -12,6 +12,7 @@ enum MyTabs: Int {
     case briefing
     case calendar
     case plan
+    case feelings
     case review
 }
 

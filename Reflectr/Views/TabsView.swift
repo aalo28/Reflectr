@@ -32,6 +32,12 @@ struct TabsView: View {
                 Label("Plan", systemImage: "list.bullet.clipboard")
             }
 
+            Tab(value: MyTabs.feelings) {
+                FeelingsView()
+            } label: {
+                Label("Feelings", systemImage: "waveform.path.ecg")
+            }
+
             Tab(value: MyTabs.review) {
                 ReviewView()
             } label: {
