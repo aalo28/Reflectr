@@ -6,6 +6,7 @@
 //  • a workout row — title (with the day's general feeling as a chip), then
 //    four columns: Before · During · After · +1 day;
 //  • a rest-day row — one line: date, "Rest day", the day's general feeling.
+//  Notes from the day's general check-ins show under the row's first line.
 //  A summary card on top compares your baseline on training vs rest days.
 //
 
@@ -217,6 +218,37 @@ private struct DailyChip: View {
     }
 }
 
+/// The notes from a day's general check-ins, one per line. Tap one to edit it.
+private struct DailyNotes: View {
+    let checkIns: [FeelingCheckIn]
+    let onSelect: (DailyEdit) -> Void
+
+    var body: some View {
+        let withNotes = checkIns.filter { !($0.note ?? "").isEmpty }
+        if !withNotes.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(withNotes) { c in
+                    Button {
+                        onSelect(DailyEdit(target: .existing(c), date: c.date))
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Image(systemName: CheckInPhase.daily.systemImage)
+                                .foregroundStyle(.orange)
+                            Text(c.note ?? "")
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .font(.caption)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Rows
 
 private struct FeelingsRow: View {
@@ -258,6 +290,8 @@ private struct FeelingsRow: View {
                 .buttonStyle(.plain)
             }
 
+            DailyNotes(checkIns: daily, onSelect: onSelectDaily)
+
             HStack(alignment: .top, spacing: 6) {
                 ForEach(CheckInPhase.workoutPhases) { phase in
                     cell(for: phase)
@@ -289,6 +323,16 @@ private struct RestDayRow: View {
     let onSelectDaily: (DailyEdit) -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            mainLine
+            DailyNotes(checkIns: daily, onSelect: onSelectDaily)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var mainLine: some View {
         HStack(spacing: 8) {
             Image(systemName: "moon.zzz")
                 .foregroundStyle(.secondary)
@@ -301,9 +345,6 @@ private struct RestDayRow: View {
             Spacer(minLength: 4)
             DailyChip(day: day, checkIns: daily, onSelect: onSelectDaily)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var title: String {
