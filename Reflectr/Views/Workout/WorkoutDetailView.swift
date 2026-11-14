@@ -17,6 +17,7 @@ struct WorkoutDetailView: View {
 
     @State private var showReflection = false
     @State private var showEdit = false
+    @State private var checkInTarget: CheckInTarget?
 
     var body: some View {
         ScrollView {
@@ -31,6 +32,7 @@ struct WorkoutDetailView: View {
                 if !workout.isStrength {
                     priorAdviceCard
                 }
+                FeelingTimelineCard(workout: workout) { checkInTarget = $0 }
                 if workout.isPlanned && !workout.isCompleted {
                     plannedActions
                 } else {
@@ -61,6 +63,9 @@ struct WorkoutDetailView: View {
         }
         .sheet(isPresented: $showEdit) {
             AddWorkoutView(editing: workout)
+        }
+        .sheet(item: $checkInTarget) { target in
+            CheckInEditorView(workout: workout, target: target)
         }
     }
 
