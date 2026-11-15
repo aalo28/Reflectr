@@ -2,9 +2,9 @@
 //  FeelingsView.swift
 //  Reflectr
 //
-//  Everything on one page, oldest first like the calendar — scroll up for the
-//  past, down for upcoming days; it opens on today. Rows are grouped under a
-//  date header per day:
+//  One week per page — swipe right for earlier weeks, left for later ones;
+//  it opens on this week. Each page lists the days top to bottom, each under
+//  a date header:
 //  • a workout row — title, a one-line "how was the day" strip (scores +
 //    note), then four columns: Before · During · After · +1 day;
 //  • a rest-day row — "Rest day" and the same one-line day strip.
@@ -16,7 +16,6 @@ import SwiftUI
 import SwiftData
 
 struct FeelingsView: View {
-    /// Completed workouts plus upcoming planned ones (filtered in `rows`).
     @Query(sort: \Workout.date, order: .forward) private var allWorkouts: [Workout]
 
     @Query(
@@ -24,66 +23,61 @@ struct FeelingsView: View {
         sort: \FeelingCheckIn.date
     ) private var dailyCheckIns: [FeelingCheckIn]
 
+    /// Weeks relative to this one: 0 = this week, -1 = last week, 1 = next week.
+    @State private var weekOffset = 0
     @State private var editing: (workout: Workout, target: CheckInTarget)?
     @State private var editingDaily: DailyEdit?
     @State private var showSummary = false
-    @State private var didScrollToToday = false
-
-    /// How many days ahead to show, even with nothing planned.
-    private static let daysAhead = 7
 
     var body: some View {
         let today = Date.now.startOfDay
+        let thisWeek = today.startOfWeek
+        // Completed workouts, plus planned ones that are still ahead.
         let workouts = allWorkouts.filter { $0.isCompleted || ($0.isPlanned && $0.date >= today) }
         let dailyByDay = Dictionary(grouping: dailyCheckIns, by: { $0.date.startOfDay })
         let workoutsByDay = Dictionary(grouping: workouts, by: { $0.date.startOfDay })
-        let groups = Self.groupedByDay(
-            Self.rows(workouts: workouts, workoutDays: Set(workoutsByDay.keys), dailyDays: Set(dailyByDay.keys))
-        )
+        let range = Self.weekRange(thisWeek: thisWeek, workouts: workouts, checkIns: dailyCheckIns)
 
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(groups, id: \.day) { group in
-                            dayGroup(group, today: today, dailyByDay: dailyByDay)
-                                .id(group.day)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom)
-                }
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    columnHeader
-                        .padding(.horizontal)
-                        .padding(.bottom, 4)
-                }
-                .scrollContentBackground(.hidden)
-                .background(BackgroundGradient())
-                .navigationTitle("Feelings")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { showSummary = true } label: {
-                            Label("In general", systemImage: "chart.bar.xaxis")
-                        }
-                    }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button("Today") {
-                            withAnimation(.snappy) { proxy.scrollTo(today, anchor: .top) }
-                        }
-                        Button {
-                            editingDaily = DailyEdit(target: .new(.daily), date: .now)
-                        } label: {
-                            Label("Log how you feel today", systemImage: "plus")
-                        }
+            VStack(spacing: 8) {
+                weekHeader(thisWeek: thisWeek, range: range)
+                columnHeader
+
+                // Swipe right for earlier weeks, left for later ones.
+                TabView(selection: $weekOffset) {
+                    ForEach(range, id: \.self) { offset in
+                        WeekPage(
+                            weekStart: thisWeek.addingWeeks(offset),
+                            today: today,
+                            workoutsByDay: workoutsByDay,
+                            dailyByDay: dailyByDay,
+                            onSelect: { editing = $0 },
+                            onSelectDaily: { editingDaily = $0 }
+                        )
+                        .tag(offset)
                     }
                 }
-                .onAppear {
-                    // Open on today: past days above, upcoming days below — like the calendar.
-                    guard !didScrollToToday else { return }
-                    didScrollToToday = true
-                    DispatchQueue.main.async { proxy.scrollTo(today, anchor: .top) }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
+            .padding(.top, 4)
+            .background(BackgroundGradient())
+            .navigationTitle("Feelings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showSummary = true } label: {
+                        Label("In general", systemImage: "chart.bar.xaxis")
+                    }
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if weekOffset != 0 {
+                        Button("Today") { withAnimation(.snappy) { weekOffset = 0 } }
+                    }
+                    Button {
+                        editingDaily = DailyEdit(target: .new(.daily), date: .now)
+                    } label: {
+                        Label("Log how you feel today", systemImage: "plus")
+                    }
                 }
             }
             .navigationDestination(for: Workout.self) { WorkoutDetailView(workout: $0) }
@@ -117,69 +111,47 @@ struct FeelingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func dayGroup(
-        _ group: (day: Date, rows: [FeelingsRowItem]),
-        today: Date,
-        dailyByDay: [Date: [FeelingCheckIn]]
-    ) -> some View {
-        let isFuture = group.day > today
-        VStack(spacing: 10) {
-            Text(dayLabel(group.day))
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(group.day == today ? Color.accentColor : Color.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 8)
-                .padding(.leading, 4)
-            ForEach(group.rows) { row in
-                switch row {
-                case .workout(let workout) where isFuture:
-                    UpcomingWorkoutRow(workout: workout)
-                case .workout(let workout):
-                    FeelingsRow(
-                        workout: workout,
-                        daily: dailyByDay[group.day] ?? [],
-                        onSelect: { editing = (workout, $0) },
-                        onSelectDaily: { editingDaily = $0 }
-                    )
-                case .restDay where isFuture:
-                    UpcomingRestRow()
-                case .restDay(let day):
-                    RestDayRow(
-                        day: day,
-                        daily: dailyByDay[day] ?? [],
-                        onSelectDaily: { editingDaily = $0 }
-                    )
-                }
-            }
+    /// From the first week with any data (at least 8 weeks back) to the last
+    /// week with something planned (at least next week).
+    private static func weekRange(thisWeek: Date, workouts: [Workout], checkIns: [FeelingCheckIn]) -> [Int] {
+        let cal = Calendar.current
+        func offset(_ date: Date) -> Int {
+            cal.dateComponents([.weekOfYear], from: thisWeek, to: date.startOfWeek).weekOfYear ?? 0
         }
+        let dates = workouts.map(\.date) + checkIns.map(\.date)
+        let first = min(dates.map(offset).min() ?? 0, -8)
+        let last = max(dates.map(offset).max() ?? 0, 1)
+        return Array(first...last)
     }
 
-    /// Oldest first, like the calendar. Includes completed and planned workouts,
-    /// and as rest days: the last two weeks (so you can fill them in), any older
-    /// day with a daily check-in, and the next week ahead.
-    private static func rows(workouts: [Workout], workoutDays: Set<Date>, dailyDays: Set<Date>) -> [FeelingsRowItem] {
-        let today = Date.now.startOfDay
-        var restDays = Set((-13...daysAhead).map { today.addingDays($0) })
-        restDays.formUnion(dailyDays.filter { $0 <= today })
-        restDays.subtract(workoutDays)
-
-        let items = workouts.map(FeelingsRowItem.workout) + restDays.map(FeelingsRowItem.restDay)
-        return items.sorted { $0.sortDate < $1.sortDate }
-    }
-
-    /// Consecutive rows that fall on the same day, so the date is shown once above them.
-    private static func groupedByDay(_ rows: [FeelingsRowItem]) -> [(day: Date, rows: [FeelingsRowItem])] {
-        var groups: [(day: Date, rows: [FeelingsRowItem])] = []
-        for row in rows {
-            let day = row.sortDate.startOfDay
-            if groups.last?.day == day {
-                groups[groups.count - 1].rows.append(row)
-            } else {
-                groups.append((day, [row]))
-            }
+    private func weekHeader(thisWeek: Date, range: [Int]) -> some View {
+        let start = thisWeek.addingWeeks(weekOffset)
+        let end = start.addingDays(6)
+        let title: String = switch weekOffset {
+        case 0: "This week"
+        case -1: "Last week"
+        case 1: "Next week"
+        default: weekOffset < 0 ? "\(-weekOffset) weeks ago" : "In \(weekOffset) weeks"
         }
-        return groups
+        return HStack {
+            Button { withAnimation(.snappy) { weekOffset -= 1 } } label: {
+                Image(systemName: "chevron.left").padding(8)
+            }
+            .disabled(weekOffset <= (range.first ?? 0))
+            Spacer()
+            VStack(spacing: 1) {
+                Text(title).font(.headline)
+                Text("\(start.formatted(.dateTime.day().month(.abbreviated))) – \(end.formatted(.dateTime.day().month(.abbreviated)))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { withAnimation(.snappy) { weekOffset += 1 } } label: {
+                Image(systemName: "chevron.right").padding(8)
+            }
+            .disabled(weekOffset >= (range.last ?? 0))
+        }
+        .padding(.horizontal)
     }
 
     private var columnHeader: some View {
@@ -199,24 +171,65 @@ struct FeelingsView: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .background(.bar, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
     }
 }
 
-private enum FeelingsRowItem: Identifiable {
-    case workout(Workout)
-    case restDay(Date)
+// MARK: - Week page
 
-    var id: String {
-        switch self {
-        case .workout(let w): "w-\(w.persistentModelID.hashValue)"
-        case .restDay(let d): "r-\(d.timeIntervalSinceReferenceDate)"
+/// One week, Monday (or your locale's first day) at the top, scrolling down through the days.
+private struct WeekPage: View {
+    let weekStart: Date
+    let today: Date
+    let workoutsByDay: [Date: [Workout]]
+    let dailyByDay: [Date: [FeelingCheckIn]]
+    let onSelect: ((workout: Workout, target: CheckInTarget)) -> Void
+    let onSelectDaily: (DailyEdit) -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(0..<7, id: \.self) { i in
+                    dayGroup(weekStart.addingDays(i))
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom)
         }
+        .scrollContentBackground(.hidden)
     }
 
-    var sortDate: Date {
-        switch self {
-        case .workout(let w): w.date
-        case .restDay(let d): d
+    @ViewBuilder
+    private func dayGroup(_ day: Date) -> some View {
+        let isFuture = day > today
+        let workouts = workoutsByDay[day] ?? []
+        VStack(spacing: 10) {
+            Text(dayLabel(day))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(day == today ? Color.accentColor : Color.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+                .padding(.leading, 4)
+
+            if workouts.isEmpty {
+                if isFuture {
+                    UpcomingRestRow()
+                } else {
+                    RestDayRow(day: day, daily: dailyByDay[day] ?? [], onSelectDaily: onSelectDaily)
+                }
+            }
+            ForEach(workouts) { workout in
+                if isFuture {
+                    UpcomingWorkoutRow(workout: workout)
+                } else {
+                    FeelingsRow(
+                        workout: workout,
+                        daily: dailyByDay[day] ?? [],
+                        onSelect: { onSelect((workout, $0)) },
+                        onSelectDaily: onSelectDaily
+                    )
+                }
+            }
         }
     }
 }
