@@ -107,6 +107,14 @@ extension Workout {
         (checkIns ?? []).filter { $0.phase == phase }.sorted { $0.date < $1.date }
     }
 
+    /// How the session felt, from the check-ins ("Right after" first, else
+    /// "During"), falling back to the rating on older reflections.
+    var feeling: Int? {
+        checkIns(for: .after).first?.feeling
+            ?? checkIns(for: .during).first?.feeling
+            ?? reflection?.feeling
+    }
+
     var orderedExercises: [Exercise] {
         (exercises ?? []).sorted { $0.order < $1.order }
     }

@@ -14,8 +14,6 @@ struct ReflectionEditorView: View {
 
     let workout: Workout
 
-    @State private var feeling: Int?
-    @State private var energy: Int?
     @State private var rpe: Int?
     @State private var whatWentWell = ""
     @State private var whatWasntOptimal = ""
@@ -29,10 +27,14 @@ struct ReflectionEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("How did it feel?") {
-                    RatingPicker(title: "Overall", systemImage: "face.smiling", range: 1...5, selection: $feeling)
-                    RatingPicker(title: "Energy", systemImage: "bolt", range: 1...5, selection: $energy)
+                Section {
                     EffortSlider(rpe: $rpe)
+                } header: {
+                    Text("How hard was it?")
+                } footer: {
+                    // How you *felt* is logged once, as a check-in (Feelings tab /
+                    // "How you felt" on the workout) — not repeated here.
+                    Text("How you felt is logged in your check-ins, not here.")
                 }
 
                 Section {
@@ -111,8 +113,6 @@ struct ReflectionEditorView: View {
 
     private func loadExisting() {
         guard let r = workout.reflection else { return }
-        feeling = r.feeling
-        energy = r.energy
         rpe = r.rpe
         whatWentWell = r.whatWentWell ?? ""
         whatWasntOptimal = r.whatWasntOptimal ?? ""
@@ -130,8 +130,6 @@ struct ReflectionEditorView: View {
             return new
         }()
 
-        reflection.feeling = feeling
-        reflection.energy = energy
         reflection.rpe = rpe
         reflection.whatWentWell = trimmedOrNil(whatWentWell)
         reflection.whatWasntOptimal = trimmedOrNil(whatWasntOptimal)

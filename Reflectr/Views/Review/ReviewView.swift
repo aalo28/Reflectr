@@ -114,7 +114,7 @@ struct ReviewView: View {
         return VStack(alignment: .leading, spacing: 10) {
             Text("Feeling trend").font(.subheadline.bold())
             if points.allSatisfy({ $0.value == 0 }) {
-                Text("Add reflections to see how your weeks trend.")
+                Text("Log how you felt after workouts to see how your weeks trend.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 80)
             } else {
@@ -219,7 +219,7 @@ struct ReviewView: View {
         var s = WeekSummary()
         s.count = items.count
         s.totalMinutes = items.reduce(0) { $0 + Int(($1.durationMinutes ?? 0).rounded()) }
-        s.avgFeeling = average(items.compactMap { $0.reflection?.feeling })
+        s.avgFeeling = average(items.compactMap(\.feeling))
         s.avgRPE = average(items.compactMap { $0.reflection?.rpe })
         return s
     }
