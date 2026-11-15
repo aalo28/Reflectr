@@ -2,23 +2,22 @@
 //  FeelingsView.swift
 //  Reflectr
 //
-//  Everything on one page, newest first:
-//  Rows are grouped under a date header per day:
+//  Everything on one page, oldest first like the calendar — scroll up for the
+//  past, down for upcoming days; it opens on today. Rows are grouped under a
+//  date header per day:
 //  • a workout row — title, a one-line "how was the day" strip (scores +
 //    note), then four columns: Before · During · After · +1 day;
 //  • a rest-day row — "Rest day" and the same one-line day strip.
-//  A summary card on top compares your baseline on training vs rest days.
+//  Upcoming days show planned workouts (nothing to log yet). The "In general"
+//  sheet (toolbar) compares your baseline on training vs rest days.
 //
 
 import SwiftUI
 import SwiftData
 
 struct FeelingsView: View {
-    @Query(
-        filter: #Predicate<Workout> { $0.isCompleted },
-        sort: \Workout.date,
-        order: .reverse
-    ) private var workouts: [Workout]
+    /// Completed workouts plus upcoming planned ones (filtered in `rows`).
+    @Query(sort: \Workout.date, order: .forward) private var allWorkouts: [Workout]
 
     @Query(
         filter: #Predicate<FeelingCheckIn> { $0.phaseRaw == "daily" },
@@ -27,59 +26,64 @@ struct FeelingsView: View {
 
     @State private var editing: (workout: Workout, target: CheckInTarget)?
     @State private var editingDaily: DailyEdit?
+    @State private var showSummary = false
+    @State private var didScrollToToday = false
+
+    /// How many days ahead to show, even with nothing planned.
+    private static let daysAhead = 7
 
     var body: some View {
+        let today = Date.now.startOfDay
+        let workouts = allWorkouts.filter { $0.isCompleted || ($0.isPlanned && $0.date >= today) }
         let dailyByDay = Dictionary(grouping: dailyCheckIns, by: { $0.date.startOfDay })
         let workoutsByDay = Dictionary(grouping: workouts, by: { $0.date.startOfDay })
-        let rows = Self.rows(workouts: workouts, workoutDays: Set(workoutsByDay.keys), dailyDays: Set(dailyByDay.keys))
+        let groups = Self.groupedByDay(
+            Self.rows(workouts: workouts, workoutDays: Set(workoutsByDay.keys), dailyDays: Set(dailyByDay.keys))
+        )
 
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 10, pinnedViews: [.sectionHeaders]) {
-                    DailySummaryCard(checkInsByDay: dailyByDay, workoutsByDay: workoutsByDay)
-                    Section {
-                        ForEach(Self.groupedByDay(rows), id: \.day) { group in
-                            Text(dayLabel(group.day))
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, 8)
-                                .padding(.leading, 4)
-                            ForEach(group.rows) { row in
-                            switch row {
-                            case .workout(let workout):
-                                FeelingsRow(
-                                    workout: workout,
-                                    daily: dailyByDay[workout.date.startOfDay] ?? [],
-                                    onSelect: { editing = (workout, $0) },
-                                    onSelectDaily: { editingDaily = $0 }
-                                )
-                            case .restDay(let day):
-                                RestDayRow(
-                                    day: day,
-                                    daily: dailyByDay[day] ?? [],
-                                    onSelectDaily: { editingDaily = $0 }
-                                )
-                            }
-                            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(groups, id: \.day) { group in
+                            dayGroup(group, today: today, dailyByDay: dailyByDay)
+                                .id(group.day)
                         }
-                    } header: {
-                        columnHeader
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom)
+                }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    columnHeader
+                        .padding(.horizontal)
+                        .padding(.bottom, 4)
+                }
+                .scrollContentBackground(.hidden)
+                .background(BackgroundGradient())
+                .navigationTitle("Feelings")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { showSummary = true } label: {
+                            Label("In general", systemImage: "chart.bar.xaxis")
+                        }
+                    }
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button("Today") {
+                            withAnimation(.snappy) { proxy.scrollTo(today, anchor: .top) }
+                        }
+                        Button {
+                            editingDaily = DailyEdit(target: .new(.daily), date: .now)
+                        } label: {
+                            Label("Log how you feel today", systemImage: "plus")
+                        }
                     }
                 }
-                .padding(.horizontal)
-                .padding(.bottom)
-            }
-            .scrollContentBackground(.hidden)
-            .background(BackgroundGradient())
-            .navigationTitle("Feelings")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        editingDaily = DailyEdit(target: .new(.daily), date: .now)
-                    } label: {
-                        Label("Log how you feel today", systemImage: "plus")
-                    }
+                .onAppear {
+                    // Open on today: past days above, upcoming days below — like the calendar.
+                    guard !didScrollToToday else { return }
+                    didScrollToToday = true
+                    DispatchQueue.main.async { proxy.scrollTo(today, anchor: .top) }
                 }
             }
             .navigationDestination(for: Workout.self) { WorkoutDetailView(workout: $0) }
@@ -94,20 +98,74 @@ struct FeelingsView: View {
             .sheet(item: $editingDaily) { edit in
                 CheckInEditorView(workout: nil, target: edit.target, initialDate: edit.date)
             }
+            .sheet(isPresented: $showSummary) {
+                NavigationStack {
+                    ScrollView {
+                        DailySummaryCard(checkInsByDay: dailyByDay, workoutsByDay: workoutsByDay)
+                            .padding()
+                    }
+                    .navigationTitle("In general")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showSummary = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+            }
         }
     }
 
-    /// Workouts plus rest days, newest first. Rest days shown: the last two
-    /// weeks (so you can fill them in) and any older day with a daily check-in.
+    @ViewBuilder
+    private func dayGroup(
+        _ group: (day: Date, rows: [FeelingsRowItem]),
+        today: Date,
+        dailyByDay: [Date: [FeelingCheckIn]]
+    ) -> some View {
+        let isFuture = group.day > today
+        VStack(spacing: 10) {
+            Text(dayLabel(group.day))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(group.day == today ? Color.accentColor : Color.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+                .padding(.leading, 4)
+            ForEach(group.rows) { row in
+                switch row {
+                case .workout(let workout) where isFuture:
+                    UpcomingWorkoutRow(workout: workout)
+                case .workout(let workout):
+                    FeelingsRow(
+                        workout: workout,
+                        daily: dailyByDay[group.day] ?? [],
+                        onSelect: { editing = (workout, $0) },
+                        onSelectDaily: { editingDaily = $0 }
+                    )
+                case .restDay where isFuture:
+                    UpcomingRestRow()
+                case .restDay(let day):
+                    RestDayRow(
+                        day: day,
+                        daily: dailyByDay[day] ?? [],
+                        onSelectDaily: { editingDaily = $0 }
+                    )
+                }
+            }
+        }
+    }
+
+    /// Oldest first, like the calendar. Includes completed and planned workouts,
+    /// and as rest days: the last two weeks (so you can fill them in), any older
+    /// day with a daily check-in, and the next week ahead.
     private static func rows(workouts: [Workout], workoutDays: Set<Date>, dailyDays: Set<Date>) -> [FeelingsRowItem] {
         let today = Date.now.startOfDay
-        var restDays = Set((0..<14).map { today.addingDays(-$0) })
+        var restDays = Set((-13...daysAhead).map { today.addingDays($0) })
         restDays.formUnion(dailyDays.filter { $0 <= today })
         restDays.subtract(workoutDays)
 
         let items = workouts.map(FeelingsRowItem.workout) + restDays.map(FeelingsRowItem.restDay)
-        // Same day: rest-day can't collide with workouts; workouts keep their time order.
-        return items.sorted { $0.sortDate > $1.sortDate }
+        return items.sorted { $0.sortDate < $1.sortDate }
     }
 
     /// Consecutive rows that fall on the same day, so the date is shown once above them.
@@ -377,6 +435,64 @@ private struct RestDayRow: View {
         }
         .padding(10)
         .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+/// A planned workout on a future day: nothing to log yet.
+private struct UpcomingWorkoutRow: View {
+    let workout: Workout
+
+    var body: some View {
+        NavigationLink(value: workout) {
+            HStack(spacing: 8) {
+                Image(systemName: workout.type.systemImage)
+                    .foregroundStyle(workout.type.tint)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(workout.title.isEmpty ? workout.type.label : workout.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    if let focus = workout.plannedFocus, !focus.isEmpty {
+                        Text(focus).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 4)
+                Text("Planned")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .foregroundStyle(.secondary.opacity(0.5))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A future day with nothing planned.
+private struct UpcomingRestRow: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "moon.zzz")
+                .frame(width: 22)
+            Text("Nothing planned")
+                .font(.subheadline)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.tertiary)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                .foregroundStyle(.secondary.opacity(0.3))
+        )
     }
 }
 

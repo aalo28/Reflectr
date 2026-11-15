@@ -163,7 +163,7 @@ struct ExerciseDetailView: View {
                 && (candidate.workout?.date ?? .distantPast) < cutoff
         }
         return matches.sorted {
-            ($0.workout?.date ?? .distantPast) > ($1.workout?.date ?? .distantPast)
+            ($0.workout?.date ?? .distantPast) < ($1.workout?.date ?? .distantPast)
         }
     }
 

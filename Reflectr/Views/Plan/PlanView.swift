@@ -20,6 +20,16 @@ struct PlanView: View {
         @Bindable var router = router
         NavigationStack(path: $router.planPath) {
             List {
+                if !needingReflection.isEmpty {
+                    Section("Needs a reflection") {
+                        ForEach(needingReflection) { workout in
+                            NavigationLink(value: workout) {
+                                WorkoutRowView(workout: workout)
+                            }
+                        }
+                    }
+                }
+
                 if !upcoming.isEmpty {
                     Section("Upcoming") {
                         ForEach(upcoming) { workout in
@@ -36,16 +46,6 @@ struct PlanView: View {
                             }
                         }
                         .onDelete { delete(upcoming, at: $0) }
-                    }
-                }
-
-                if !needingReflection.isEmpty {
-                    Section("Needs a reflection") {
-                        ForEach(needingReflection) { workout in
-                            NavigationLink(value: workout) {
-                                WorkoutRowView(workout: workout)
-                            }
-                        }
                     }
                 }
 
@@ -93,7 +93,7 @@ struct PlanView: View {
     }
 
     private var needingReflection: [Workout] {
-        workouts.filter { $0.needsReflection }.sorted { $0.date > $1.date }
+        workouts.filter { $0.needsReflection }
     }
 
     private func complete(_ workout: Workout) {

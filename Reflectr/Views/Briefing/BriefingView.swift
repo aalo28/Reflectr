@@ -25,18 +25,20 @@ struct BriefingView: View {
         NavigationStack(path: $router.briefingPath) {
             ScrollView {
                 VStack(spacing: 20) {
-                    if let next = nextPlanned {
-                        upNextCard(next)
-                    }
-
+                    // Oldest first, like the calendar: past sessions above, what's next below.
                     if sessions.isEmpty {
                         emptyState
                     } else {
-                        ForEach(sessions) { sessionCard($0) }
+                        ForEach(sessions.reversed()) { sessionCard($0) }
+                    }
+
+                    if let next = nextPlanned {
+                        upNextCard(next)
                     }
                 }
                 .padding()
             }
+            .defaultScrollAnchor(.bottom)
             .scrollContentBackground(.hidden)
             .background(BackgroundGradient())
             .navigationTitle("Briefing")
