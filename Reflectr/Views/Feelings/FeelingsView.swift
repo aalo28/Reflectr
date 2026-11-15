@@ -3,9 +3,10 @@
 //  Reflectr
 //
 //  Everything on one page, newest first:
-//  • a workout row — small date above the title, a one-line "how was the
-//    day" strip (scores + note), then four columns: Before · During · After · +1 day;
-//  • a rest-day row — small date, "Rest day", and the same one-line day strip.
+//  Rows are grouped under a date header per day:
+//  • a workout row — title, a one-line "how was the day" strip (scores +
+//    note), then four columns: Before · During · After · +1 day;
+//  • a rest-day row — "Rest day" and the same one-line day strip.
 //  A summary card on top compares your baseline on training vs rest days.
 //
 
@@ -37,7 +38,14 @@ struct FeelingsView: View {
                 LazyVStack(spacing: 10, pinnedViews: [.sectionHeaders]) {
                     DailySummaryCard(checkInsByDay: dailyByDay, workoutsByDay: workoutsByDay)
                     Section {
-                        ForEach(rows) { row in
+                        ForEach(Self.groupedByDay(rows), id: \.day) { group in
+                            Text(dayLabel(group.day))
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 8)
+                                .padding(.leading, 4)
+                            ForEach(group.rows) { row in
                             switch row {
                             case .workout(let workout):
                                 FeelingsRow(
@@ -52,6 +60,7 @@ struct FeelingsView: View {
                                     daily: dailyByDay[day] ?? [],
                                     onSelectDaily: { editingDaily = $0 }
                                 )
+                            }
                             }
                         }
                     } header: {
@@ -99,6 +108,20 @@ struct FeelingsView: View {
         let items = workouts.map(FeelingsRowItem.workout) + restDays.map(FeelingsRowItem.restDay)
         // Same day: rest-day can't collide with workouts; workouts keep their time order.
         return items.sorted { $0.sortDate > $1.sortDate }
+    }
+
+    /// Consecutive rows that fall on the same day, so the date is shown once above them.
+    private static func groupedByDay(_ rows: [FeelingsRowItem]) -> [(day: Date, rows: [FeelingsRowItem])] {
+        var groups: [(day: Date, rows: [FeelingsRowItem])] = []
+        for row in rows {
+            let day = row.sortDate.startOfDay
+            if groups.last?.day == day {
+                groups[groups.count - 1].rows.append(row)
+            } else {
+                groups.append((day, [row]))
+            }
+        }
+        return groups
     }
 
     private var columnHeader: some View {
@@ -187,7 +210,7 @@ private struct Scores: View {
     }
 }
 
-/// Small date shown above each row's title.
+/// Date header shown above each day's rows.
 private func dayLabel(_ day: Date) -> String {
     let cal = Calendar.current
     let date = day.formatted(.dateTime.weekday(.abbreviated).day().month())
@@ -295,14 +318,9 @@ private struct FeelingsRow: View {
                     Image(systemName: workout.type.systemImage)
                         .foregroundStyle(workout.type.tint)
                         .frame(width: 22)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(dayLabel(workout.date))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text(workout.title.isEmpty ? workout.type.label : workout.title)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                    }
+                    Text(workout.title.isEmpty ? workout.type.label : workout.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
                     Spacer(minLength: 4)
                     Image(systemName: "chevron.right")
                         .font(.caption)
@@ -338,7 +356,7 @@ private struct FeelingsRow: View {
     }
 }
 
-/// A day without training: small date, "Rest day", then the day's feeling line.
+/// A day without training: "Rest day", then the day's feeling line.
 private struct RestDayRow: View {
     let day: Date
     let daily: [FeelingCheckIn]
@@ -350,14 +368,9 @@ private struct RestDayRow: View {
                 Image(systemName: "moon.zzz")
                     .foregroundStyle(.secondary)
                     .frame(width: 22)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(dayLabel(day))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text("Rest day")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
+                Text("Rest day")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }
             DailyLine(day: day, checkIns: daily, onSelect: onSelectDaily)
